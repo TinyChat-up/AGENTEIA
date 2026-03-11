@@ -1,0 +1,14 @@
+{
+  "crons": [
+    {
+      "path": "/api/orchestrator",
+      "schedule": "0 0 * * *",
+      "description": "Daily metrics cycle — midnight UTC"
+    },
+    {
+      "path": "/api/orchestrator",
+      "schedule": "0 0 * * 0",
+      "description": "Weekly governance decisions — Sunday midnight UTC"
+    }
+  ]
+}
