@@ -9,6 +9,12 @@ import { createClient } from '@/lib/supabase/server'
 import { computeAgentScore } from '@/lib/scoring/engine'
 import { validateReport, shouldFreezeAgent } from '@/lib/reports/validator'
 import { runAllPolicies, deriveAgentStatus } from '@/lib/policies/governance'
+import {
+  alertAgentFrozen,
+  alertDecisionMade,
+  alertOrchestratorCycle,
+  alertPendingApproval,
+} from '@/lib/telegram/bot'
 import type {
   Agent, Budget, Decision, Learning, MetricsDaily,
   OrchestratorRun, ReportV1, Run, ScoreBreakdown,
@@ -77,7 +83,7 @@ export class MotherAI {
         })
 
         if (freezeCheck.should_freeze) {
-          await this.freezeAgent(agent.id, freezeCheck.reason!)
+          await this.freezeAgent(agent.id, freezeCheck.reason!, agent.name)
           frozen++
           continue
         }
@@ -86,11 +92,20 @@ export class MotherAI {
         await this.evaluateAndScore(agent)
       }
 
-      return this.completeCycle(run.id, {
+      const summary = `Daily cycle: ${agents.length} agents evaluated, ${frozen} frozen for missing/invalid reports.`
+      const result = await this.completeCycle(run.id, {
         agents_evaluated: agents.length,
         agents_frozen: frozen,
-        summary: `Daily cycle: ${agents.length} agents evaluated, ${frozen} frozen for missing/invalid reports.`,
+        summary,
       })
+      await alertOrchestratorCycle({
+        cycle: 'daily',
+        agentsEvaluated: agents.length,
+        decisionsMade: 0,
+        agentsFrozen: frozen,
+        summary,
+      })
+      return result
     } catch (e) {
       await this.failCycle(run.id, String(e))
       throw e
@@ -136,7 +151,7 @@ export class MotherAI {
         })
 
         if (freezeCheck.should_freeze && agent.status !== 'frozen') {
-          await this.freezeAgent(agent.id, freezeCheck.reason!)
+          await this.freezeAgent(agent.id, freezeCheck.reason!, agent.name)
           agents_frozen++
           continue
         }
@@ -179,7 +194,7 @@ export class MotherAI {
 
       const summary = this.buildWeeklySummary(agents, scores, decisions)
 
-      return this.completeCycle(run.id, {
+      const result = await this.completeCycle(run.id, {
         agents_evaluated: agents.length,
         decisions_made: decisions.length,
         reports_validated,
@@ -188,6 +203,14 @@ export class MotherAI {
         budget_redistributed_eur: redistributed,
         summary,
       })
+      await alertOrchestratorCycle({
+        cycle: 'weekly',
+        agentsEvaluated: agents.length,
+        decisionsMade: decisions.length,
+        agentsFrozen: agents_frozen,
+        summary,
+      })
+      return result
     } catch (e) {
       await this.failCycle(run.id, String(e))
       throw e
@@ -252,10 +275,12 @@ export class MotherAI {
     // Fallback to scoring engine recommendation
     const outcome: DecisionOutcome = parsed.outcome ?? score.recommendation
 
+    const rationale = parsed.rationale ?? `Score-based fallback: ${score.composite_score}/100 (${score.trend})`
+
     const { data } = await (await this.getDb()).from('decisions').insert({
       agent_id:         agent.id,
       outcome,
-      rationale:        parsed.rationale ?? `Score-based fallback: ${score.composite_score}/100 (${score.trend})`,
+      rationale,
       score_at_decision: score.composite_score,
       evidence:         parsed.evidence ?? [`score:${score.composite_score}`, `trend:${score.trend}`],
       confidence:       parsed.confidence ?? 0.7,
@@ -266,6 +291,8 @@ export class MotherAI {
       made_by:          'mother_ai',
       effective_date:   new Date().toISOString().split('T')[0],
     }).select().single()
+
+    await alertDecisionMade(agent.name, outcome, score.composite_score, rationale)
 
     return data!
   }
@@ -477,10 +504,10 @@ Status: ${agent.status} | Generation: ${agent.generation} | Consecutive failures
 
 ## LATEST REPORT${report ? '' : ': NONE SUBMITTED'}
 ${report ? `Period: ${report.period_start} → ${report.period_end}
-KPIs: revenue €${report.kpi_revenue_eur}, profit €${report.kpi_net_profit_eur}, margin ${(report.kpi_margin * 100).toFixed(1)}%
+KPIs: revenue €${report.kpis.revenue_eur}, profit €${report.kpis.net_profit_eur}, margin ${(report.kpis.margin * 100).toFixed(1)}%
 Hypothesis status: ${report.hypothesis_status}
-Blockers: ${report.ops_blockers?.join('; ') || 'none'}
-Risk overall: ${(report.risk_overall * 100).toFixed(0)}%` : 'No report → funding should be frozen'}
+Blockers: ${report.ops.blockers?.join('; ') || 'none'}
+Risk overall: ${(report.risk.overall * 100).toFixed(0)}%` : 'No report → funding should be frozen'}
 
 ## REQUIRED JSON RESPONSE
 {
@@ -538,28 +565,40 @@ Risk overall: ${(report.risk_overall * 100).toFixed(0)}%` : 'No report → fundi
       .eq('id', id)
   }
 
-  private async freezeAgent(id: string, reason: string): Promise<void> {
+  private async freezeAgent(id: string, reason: string, agentName = 'Unknown'): Promise<void> {
     await (await this.getDb()).from('agents').update({ status: 'frozen' }).eq('id', id)
     await (await this.getDb()).from('decisions').insert({
       agent_id: id, outcome: 'hold', rationale: `Auto-frozen: ${reason}`,
       score_at_decision: 0, evidence: [reason], confidence: 1.0, made_by: 'mother_ai',
       effective_date: new Date().toISOString().split('T')[0],
     })
+    await alertAgentFrozen(agentName, reason)
   }
 
   private async recordBudgetChange(agent: Agent, budget: Budget, delta: number, description: string): Promise<void> {
     if (delta > 0) {
       await (await this.getDb()).from('budgets').update({ allocated_eur: budget.allocated_eur + delta }).eq('id', budget.id)
     }
-    await (await this.getDb()).from('transactions_ledger').insert({
+    const needsApproval = Math.abs(delta) > 30
+    const { data: tx } = await (await this.getDb()).from('transactions_ledger').insert({
       agent_id: agent.id, budget_id: budget.id,
       type: delta > 0 ? 'budget_allocation' : 'reclaim',
       amount_eur: delta,
       balance_after_eur: budget.available_eur + delta,
       description, approved_by: 'mother_ai',
-      requires_approval: Math.abs(delta) > 30,
-      approved_at: Math.abs(delta) <= 30 ? new Date().toISOString() : null,
-    })
+      requires_approval: needsApproval,
+      approved_at: needsApproval ? null : new Date().toISOString(),
+    }).select().single()
+
+    if (needsApproval && tx) {
+      await alertPendingApproval({
+        transactionId: tx.id,
+        agentName: agent.name,
+        amount: Math.abs(delta),
+        vendor: 'Mother AI',
+        description,
+      })
+    }
   }
 
   private async getActiveAgents(): Promise<Agent[]> {
