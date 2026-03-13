@@ -84,7 +84,7 @@ export async function alertPendingApproval(params: {
     `/rechazar_${transactionId}`,
     {
       inline_keyboard: [[
-        { text: '✅ Aprobar', callback_data: `approve_${transactionId}` },
+        { text: `✅ Aprobar €${amount}`, callback_data: `approve_${transactionId}` },
         { text: '❌ Rechazar', callback_data: `reject_${transactionId}` },
       ]]
     }

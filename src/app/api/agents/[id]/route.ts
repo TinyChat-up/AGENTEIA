@@ -6,12 +6,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 // GET /api/agents/[id]
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('agent_full_status')
     .select('*')
-    .eq('id', params.id)
+    .eq('id', id)
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 404 })
@@ -19,7 +20,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 }
 
 // PATCH /api/agents/[id] — Update, pause, resume, or kill
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const supabase = await createClient()
   const body = await req.json()
   const { action, reason } = body
@@ -33,29 +35,29 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
       // Call DB function which also registers the decision
       const { error } = await supabase.rpc('apply_kill_switch', {
-        p_agent_id: params.id,
+        p_agent_id: id,
         p_reason:   reason,
       })
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-      return NextResponse.json({ data: { action: 'kill', agent_id: params.id, reason } })
+      return NextResponse.json({ data: { action: 'kill', agent_id: id, reason } })
     }
 
     // ---- MANUAL PAUSE ---------------------------------------
     case 'pause': {
       const { error } = await supabase.rpc('apply_pause', {
-        p_agent_id: params.id,
+        p_agent_id: id,
         p_reason:   reason ?? 'Manual pause',
       })
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      return NextResponse.json({ data: { action: 'pause', agent_id: params.id } })
+      return NextResponse.json({ data: { action: 'pause', agent_id: id } })
     }
 
     // ---- RESUME ---------------------------------------------
     case 'resume': {
-      const { error } = await supabase.rpc('apply_resume', { p_agent_id: params.id })
+      const { error } = await supabase.rpc('apply_resume', { p_agent_id: id })
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      return NextResponse.json({ data: { action: 'resume', agent_id: params.id } })
+      return NextResponse.json({ data: { action: 'resume', agent_id: id } })
     }
 
     // ---- GENERIC FIELD UPDATE -------------------------------
@@ -68,7 +70,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (Object.keys(updates).length === 0) {
         return NextResponse.json({ error: 'No updatable fields provided' }, { status: 400 })
       }
-      const { data, error } = await supabase.from('agents').update(updates).eq('id', params.id).select().single()
+      const { data, error } = await supabase.from('agents').update(updates).eq('id', id).select().single()
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ data })
     }
@@ -79,7 +81,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 // DELETE /api/agents/[id] — Permanently terminate (irreversible)
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const supabase = await createClient()
   const body = await req.json().catch(() => ({}))
 
@@ -93,8 +96,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const { error } = await supabase
     .from('agents')
     .update({ status: 'terminated' })
-    .eq('id', params.id)
+    .eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ data: { terminated: params.id } })
+  return NextResponse.json({ data: { terminated: id } })
 }

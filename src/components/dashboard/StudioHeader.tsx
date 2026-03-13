@@ -78,7 +78,7 @@ export function StudioHeader({ summary }: StudioHeaderProps) {
               {kpi.label}
             </div>
             <div className={`text-2xl font-light ${kpi.color}`}>
-              {kpi.value}
+              {kpi.value as string | number}
             </div>
             <div className="text-[10px] text-slate-600 mt-1">{kpi.sub}</div>
           </div>

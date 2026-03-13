@@ -63,7 +63,7 @@ export function OrchestratorStatus({ runs }: OrchestratorStatusProps) {
                 </div>
                 {Number(run.decisions_made ?? 0) > 0 && (
                   <div className="text-[9px] text-purple-400">
-                    {run.decisions_made} decisions
+                    {Number(run.decisions_made)} decisions
                   </div>
                 )}
               </div>
