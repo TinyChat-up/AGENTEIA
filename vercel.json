@@ -1,14 +1,20 @@
 {
   "crons": [
     {
-      "path": "/api/orchestrator",
-      "schedule": "0 0 * * *",
-      "description": "Daily metrics cycle — midnight UTC"
+      "path": "/api/orchestrator?cycle=daily",
+      "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/orchestrator",
-      "schedule": "0 0 * * 0",
-      "description": "Weekly governance decisions — Sunday midnight UTC"
+      "path": "/api/orchestrator?cycle=weekly",
+      "schedule": "0 0 * * 0"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/orchestrator/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/agent-run/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }
