@@ -230,30 +230,26 @@ async function executeTool(
       const query = toolInput.query as string
       const maxResults = (toolInput.max_results as number) ?? 5
 
-      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY
-      if (!braveApiKey) {
-        return '⚠️ BRAVE_SEARCH_API_KEY not configured. Add it to environment variables.'
-      }
+      const serperKey = process.env.SERPER_API_KEY
+      if (!serperKey) return '⚠️ SERPER_API_KEY not configured'
 
       try {
-        const resp = await fetch(
-          `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`,
-          {
-            headers: {
-              'Accept': 'application/json',
-              'Accept-Encoding': 'gzip',
-              'X-Subscription-Token': braveApiKey,
-            },
-          }
-        )
-        const data = await resp.json() as { web?: { results?: Array<{ title: string; url: string; description?: string }> } }
-        const results = data?.web?.results ?? []
+        const resp = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': serperKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ q: query, num: maxResults }),
+        })
+        const data = await resp.json() as { organic?: Array<{ title: string; link: string; snippet?: string }> }
+        const results = data?.organic ?? []
         if (results.length === 0) return `No results found for: ${query}`
         return results.map(r =>
-          `**${r.title}**\n${r.url}\n${r.description ?? ''}`
-        ).join('\n\n')
+          `**${r.title}**\n${r.link}\n${r.snippet ?? ''}\n`
+        ).join('\n')
       } catch (e) {
-        return `Web search failed for "${query}": ${String(e)}`
+        return `❌ Search failed: ${String(e)}`
       }
     }
 
