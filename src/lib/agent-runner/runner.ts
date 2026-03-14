@@ -10,6 +10,7 @@ import { validateReport } from '@/lib/reports/validator'
 import { checkHardLimit, checkApprovalThreshold } from '@/lib/policies/governance'
 import type { Agent, Budget, Run, ReportV1, AgentStage } from '@/types'
 
+const CLAUDE_OPUS_MODEL = 'claude-opus-4-6'
 const anthropic = new Anthropic()
 
 // ============================================================
@@ -145,6 +146,35 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ['amount_eur', 'vendor', 'description'],
     },
   },
+  {
+    name: 'send_email',
+    description: 'Send an email. Use for outreach, follow-ups, client communication, or notifications.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        to:        { type: 'string', description: 'Recipient email address' },
+        subject:   { type: 'string', description: 'Email subject line' },
+        body:      { type: 'string', description: 'Email body in plain text or HTML' },
+        from_name: { type: 'string', description: 'Sender display name (optional)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'github_push',
+    description: 'Create or update a file in a GitHub repository. Use to save generated code, landing pages, documents, or any content.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        repo:    { type: 'string', description: 'Repository in format owner/repo' },
+        path:    { type: 'string', description: 'File path within the repo, e.g. src/index.html' },
+        content: { type: 'string', description: 'Full file content as a string' },
+        message: { type: 'string', description: 'Commit message' },
+        branch:  { type: 'string', description: 'Branch name (default: main)' },
+      },
+      required: ['repo', 'path', 'content', 'message'],
+    },
+  },
 ]
 
 // ============================================================
@@ -200,26 +230,30 @@ async function executeTool(
       const query = toolInput.query as string
       const maxResults = (toolInput.max_results as number) ?? 5
 
-      // Use Anthropic's built-in web search via a sub-call
+      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY
+      if (!braveApiKey) {
+        return '⚠️ BRAVE_SEARCH_API_KEY not configured. Add it to environment variables.'
+      }
+
       try {
-        const searchResp = await anthropic.messages.create({
-          model: 'claude-opus-4-5',
-          max_tokens: 1000,
-          tools: [{ type: 'web_search_20250305' as any, name: 'web_search' }],
-          messages: [{
-            role: 'user',
-            content: `Search for: ${query}. Return the top ${maxResults} results with titles, URLs, and brief summaries.`
-          }]
-        })
-
-        const results = searchResp.content
-          .filter(b => b.type === 'text')
-          .map(b => (b as any).text)
-          .join('\n')
-
-        return results || `Search completed for: ${query}`
-      } catch {
-        return `Web search for "${query}" — Note: configure SERP API for production searches`
+        const resp = await fetch(
+          `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`,
+          {
+            headers: {
+              'Accept': 'application/json',
+              'Accept-Encoding': 'gzip',
+              'X-Subscription-Token': braveApiKey,
+            },
+          }
+        )
+        const data = await resp.json() as { web?: { results?: Array<{ title: string; url: string; description?: string }> } }
+        const results = data?.web?.results ?? []
+        if (results.length === 0) return `No results found for: ${query}`
+        return results.map(r =>
+          `**${r.title}**\n${r.url}\n${r.description ?? ''}`
+        ).join('\n\n')
+      } catch (e) {
+        return `Web search failed for "${query}": ${String(e)}`
       }
     }
 
@@ -250,13 +284,27 @@ async function executeTool(
       }
 
       const today = new Date().toISOString().split('T')[0]
-      const customKpi = { [metric_name]: value }
 
-      await supabase.from('metrics_daily').upsert({
-        agent_id: agent.id,
-        date: today,
-        custom_kpis: customKpi,
-      }, { onConflict: 'agent_id,date', ignoreDuplicates: false })
+      const { data: existing } = await supabase
+        .from('metrics_daily')
+        .select('custom_kpis')
+        .eq('agent_id', agent.id)
+        .eq('date', today)
+        .single()
+
+      if (existing) {
+        const mergedKpis = { ...(existing.custom_kpis as Record<string, number> ?? {}), [metric_name]: value }
+        await supabase.from('metrics_daily')
+          .update({ custom_kpis: mergedKpis })
+          .eq('agent_id', agent.id)
+          .eq('date', today)
+      } else {
+        await supabase.from('metrics_daily').insert({
+          agent_id: agent.id,
+          date: today,
+          custom_kpis: { [metric_name]: value },
+        })
+      }
 
       return `Metric recorded: ${metric_name} = ${value} ${unit}${notes ? ` (${notes})` : ''}`
     }
@@ -369,6 +417,106 @@ async function executeTool(
         : `✅ Spend of €${amount_eur} to ${vendor} auto-approved and recorded`
     }
 
+    case 'send_email': {
+      const { to, subject, body, from_name } = toolInput as {
+        to: string; subject: string; body: string; from_name?: string
+      }
+
+      const resendKey = process.env.RESEND_API_KEY
+      if (!resendKey) return '⚠️ RESEND_API_KEY not configured'
+
+      let status: 'sent' | 'failed' = 'failed'
+      try {
+        const fromAddress = from_name
+          ? `${from_name} <onboarding@resend.dev>`
+          : 'AI Venture Studio <onboarding@resend.dev>'
+
+        const resp = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ from: fromAddress, to, subject, html: body }),
+        })
+
+        if (!resp.ok) {
+          const err = await resp.text()
+          return `❌ Email failed: ${resp.status} ${err}`
+        }
+
+        status = 'sent'
+      } catch (e) {
+        return `❌ Email failed: ${String(e)}`
+      } finally {
+        try {
+          await supabase.from('email_log').insert({
+            agent_id: agent.id,
+            run_id: runId,
+            to_address: to,
+            subject,
+            status,
+            created_at: new Date().toISOString(),
+          })
+        } catch {
+          // table may not exist yet — ignore silently
+        }
+      }
+
+      return `✅ Email sent to ${to} — Subject: ${subject}`
+    }
+
+    case 'github_push': {
+      const { repo, path, content, message, branch } = toolInput as {
+        repo: string; path: string; content: string; message: string; branch?: string
+      }
+
+      const githubToken = process.env.GITHUB_TOKEN
+      if (!githubToken) return '⚠️ GITHUB_TOKEN not configured'
+
+      const targetBranch = branch ?? 'main'
+      const headers = {
+        'Authorization': `Bearer ${githubToken}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      }
+
+      try {
+        // Step 1: check if file already exists to get its sha
+        let sha: string | undefined
+        const getResp = await fetch(
+          `https://api.github.com/repos/${repo}/contents/${path}?ref=${targetBranch}`,
+          { headers }
+        )
+        if (getResp.ok) {
+          const existing = await getResp.json() as { sha?: string }
+          sha = existing.sha
+        }
+
+        // Step 2: create or update
+        const putBody: Record<string, unknown> = {
+          message,
+          content: Buffer.from(content).toString('base64'),
+          branch: targetBranch,
+        }
+        if (sha) putBody.sha = sha
+
+        const putResp = await fetch(
+          `https://api.github.com/repos/${repo}/contents/${path}`,
+          { method: 'PUT', headers, body: JSON.stringify(putBody) }
+        )
+
+        if (!putResp.ok) {
+          const err = await putResp.text()
+          return `❌ GitHub error: ${putResp.status} ${err}`
+        }
+
+        return `✅ ${path} pushed to ${repo} (${targetBranch})`
+      } catch (e) {
+        return `❌ GitHub error: ${String(e)}`
+      }
+    }
+
     default:
       return `Unknown tool: ${toolName}`
   }
@@ -427,7 +575,7 @@ export async function runAgent(params: {
       iterations++
 
       const response = await anthropic.messages.create({
-        model: 'claude-opus-4-5',
+        model: CLAUDE_OPUS_MODEL,
         max_tokens: 2048,
         system: buildSystemPrompt(agent as Agent, budget as Budget | null),
         tools: AGENT_TOOLS,
@@ -485,7 +633,9 @@ export async function runAgent(params: {
     }
 
     // Complete run
-    const cost_real_eur = (total_tokens / 1_000_000) * 15 // claude opus pricing ~$15/M tokens
+    const CLAUDE_OPUS_COST_USD_PER_M_TOKENS = 15
+    const USD_TO_EUR = 0.92
+    const cost_real_eur = (total_tokens / 1_000_000) * CLAUDE_OPUS_COST_USD_PER_M_TOKENS * USD_TO_EUR
 
     await supabase.from('runs').update({
       status: 'completed',
@@ -494,7 +644,7 @@ export async function runAgent(params: {
       tokens_used: total_tokens,
       tasks_completed,
       tasks_failed,
-      output_summary: final_summary.substring(0, 1000),
+      output_summary: final_summary.substring(0, 10000),
     }).eq('id', run.id)
 
     // Update consecutive_failures counter

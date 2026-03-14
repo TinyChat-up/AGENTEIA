@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { orchestrator } from '@/lib/orchestrator/mother-ai'
 import { createClient } from '@/lib/supabase/server'
 
+export const maxDuration = 60
+
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-orchestrator-secret')
   if (secret !== process.env.ORCHESTRATOR_SECRET) {

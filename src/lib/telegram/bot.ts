@@ -5,7 +5,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 
-const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID
 
 // ============================================================
@@ -185,6 +186,12 @@ export async function handleTelegramWebhook(body: TelegramUpdate): Promise<void>
   } else if (text.startsWith('/rechazar_')) {
     const txId = text.replace('/rechazar_', '')
     await handleApproval(txId, false, message.from?.first_name ?? 'Human', supabase)
+  } else if (text.startsWith('/tarea ') || text === '/tarea') {
+    await handleTareaCommand(text, supabase)
+  } else if (text === '/costes') {
+    await handleCostesCommand(supabase)
+  } else if (text === '/logs') {
+    await handleLogsCommand(supabase)
   } else if (text === '/ayuda' || text === '/help') {
     await sendTelegramMessage(
       `🤖 *AI Venture Studio — Comandos*\n\n` +
@@ -192,6 +199,9 @@ export async function handleTelegramWebhook(body: TelegramUpdate): Promise<void>
       `/pendientes — Aprobaciones pendientes\n` +
       `/aprobar_ID — Aprobar un gasto\n` +
       `/rechazar_ID — Rechazar un gasto\n` +
+      `/tarea [desc] — Lanzar tarea nueva\n` +
+      `/costes — Ver gastos del mes\n` +
+      `/logs — Ver últimas tareas\n` +
       `/ayuda — Esta ayuda`
     )
   }
@@ -275,6 +285,126 @@ async function handleApproval(
   }
 }
 
+async function handleTareaCommand(
+  text: string,
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<void> {
+  const goal = text.replace('/tarea', '').trim()
+
+  if (!goal) {
+    await sendTelegramMessage('⚠️ Uso: /tarea [descripción de la tarea]')
+    return
+  }
+
+  const { data: agent } = await supabase
+    .from('agents')
+    .select('id, name')
+    .eq('status', 'active')
+    .neq('type', 'mother')
+    .limit(1)
+    .single()
+
+  if (!agent) {
+    await sendTelegramMessage('⚠️ No hay agentes activos. Usa /agentes para ver el estado.')
+    return
+  }
+
+  const { data: run } = await supabase.from('runs').insert({
+    agent_id: agent.id,
+    goal,
+    status: 'queued',
+    cost_estimated_eur: 0,
+  }).select('id').single()
+
+  await sendTelegramMessage(
+    `⚙️ *TAREA RECIBIDA*\n\n` +
+    `${goal}\n\n` +
+    `*Agente:* ${agent.name}\n` +
+    `*ID:* ${(run?.id ?? '').substring(0, 8)}\n` +
+    `*Estado:* En cola ⏳`
+  )
+}
+
+async function handleCostesCommand(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<void> {
+  const now = new Date()
+  const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()
+  const firstDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
+
+  const [thisMonthResult, lastMonthResult, spendResult, allocResult] = await Promise.all([
+    supabase
+      .from('transactions_ledger')
+      .select('amount_eur')
+      .lt('amount_eur', 0)
+      .gte('created_at', firstDayThisMonth),
+    supabase
+      .from('transactions_ledger')
+      .select('amount_eur')
+      .lt('amount_eur', 0)
+      .gte('created_at', firstDayLastMonth)
+      .lt('created_at', firstDayThisMonth),
+    supabase
+      .from('transactions_ledger')
+      .select('amount_eur')
+      .eq('type', 'spend')
+      .gte('created_at', firstDayThisMonth)
+      .lt('created_at', firstDayNextMonth),
+    supabase
+      .from('transactions_ledger')
+      .select('amount_eur')
+      .eq('type', 'budget_allocation')
+      .gte('created_at', firstDayThisMonth)
+      .lt('created_at', firstDayNextMonth),
+  ])
+
+  const sum = (rows: { amount_eur: number }[] | null) =>
+    (rows ?? []).reduce((acc, r) => acc + Math.abs(Number(r.amount_eur)), 0).toFixed(2)
+
+  await sendTelegramMessage(
+    `💰 *COSTES*\n\n` +
+    `*Este mes:* €${sum(thisMonthResult.data)}\n` +
+    `*Mes anterior:* €${sum(lastMonthResult.data)}\n\n` +
+    `*Desglose este mes:*\n` +
+    `- Operativo: €${sum(spendResult.data)}\n` +
+    `- Asignaciones: €${sum(allocResult.data)}`
+  )
+}
+
+async function handleLogsCommand(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<void> {
+  const { data: runs } = await supabase
+    .from('runs')
+    .select('id, goal, status, cost_real_eur, agents(name)')
+    .order('created_at', { ascending: false })
+    .limit(5)
+
+  if (!runs || runs.length === 0) {
+    await sendTelegramMessage('📋 *ÚLTIMAS TAREAS*\n\nNo hay tareas registradas.')
+    return
+  }
+
+  const statusEmoji: Record<string, string> = {
+    completed: '✅',
+    failed: '❌',
+    running: '⏳',
+    queued: '⏳',
+    cancelled: '🚫',
+  }
+
+  const lines = runs.map(r => {
+    const emoji = statusEmoji[r.status] ?? '⚪'
+    const name = (r.agents as { name?: string } | null)?.name ?? 'Unknown'
+    const goal = (r.goal ?? '').substring(0, 60)
+    const cost = Number(r.cost_real_eur ?? 0).toFixed(2)
+    return `${emoji} *${name}* — ${goal}... — €${cost}`
+  }).join('\n')
+
+  await sendTelegramMessage(`📋 *ÚLTIMAS TAREAS*\n\n${lines}`)
+}
+
 // ============================================================
 // TYPES
 // ============================================================
@@ -291,5 +421,3 @@ interface TelegramUpdate {
     from: { first_name: string }
   }
 }
-
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN

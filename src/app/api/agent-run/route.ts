@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runAgent } from '@/lib/agent-runner/runner'
 import { createClient } from '@/lib/supabase/server'
 
+export const maxDuration = 60
+
 // POST /api/agent-run — trigger a run
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-orchestrator-secret')

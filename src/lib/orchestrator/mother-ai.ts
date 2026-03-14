@@ -6,6 +6,8 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
+
+const CLAUDE_OPUS_MODEL = 'claude-opus-4-6'
 import { computeAgentScore } from '@/lib/scoring/engine'
 import { validateReport, shouldFreezeAgent } from '@/lib/reports/validator'
 import { runAllPolicies, deriveAgentStatus } from '@/lib/policies/governance'
@@ -260,7 +262,7 @@ export class MotherAI {
 
     try {
       const resp = await anthropic.messages.create({
-        model: 'claude-opus-4-5',
+        model: CLAUDE_OPUS_MODEL,
         max_tokens: 1024,
         system: MOTHER_AI_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: prompt }],
@@ -415,6 +417,7 @@ export class MotherAI {
     const { data: exploiter } = await (await this.getDb()).from('agents').insert({
       name:            explorer.name.replace('Explorer', 'Exploiter').replace('EDU-', 'EDU-EXP-').replace('TECH-', 'TECH-EXP-'),
       type:            'exploiter',
+      status:          'active',
       vertical:        explorer.vertical,
       stage:           'S2',
       hypothesis:      explorer.hypothesis,
