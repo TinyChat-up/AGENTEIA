@@ -1,0 +1,173 @@
+{
+  "name": "AI Venture Studio — Daily Agent Run",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000001",
+      "name": "Daily 8AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenteia-ruddy.vercel.app/api/agent-run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-orchestrator-secret",
+              "value": "={{ $env.ORCHESTRATOR_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"agent_id\": \"ee4665c2-ff76-4ee7-859f-66f1a470a0f8\", \"goal\": \"Ejecuta tu ciclo diario: busca nichos rentables, valida demanda, crea landing si encuentras oportunidad clara, registra métricas y envía reporte.\"}",
+        "options": {
+          "timeout": 65000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0002-4002-8002-000000000002",
+      "name": "Run EDU Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "minutes"
+      },
+      "id": "a1b2c3d4-0003-4003-8003-000000000003",
+      "name": "Wait 5 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [680, 300],
+      "webhookId": "a1b2c3d4-0009-4009-8009-000000000009"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenteia-ruddy.vercel.app/api/agent-run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-orchestrator-secret",
+              "value": "={{ $env.ORCHESTRATOR_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"agent_id\": \"205c5b2c-71be-44ec-bb95-79afe5f3d365\", \"goal\": \"Ejecuta tu ciclo diario: busca nichos rentables, valida demanda, crea landing si encuentras oportunidad clara, registra métricas y envía reporte.\"}",
+        "options": {
+          "timeout": 65000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0004-4004-8004-000000000004",
+      "name": "Run TECH Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🤖 *AI Venture Studio — Daily Run*\n📅 {{ $now.toFormat('yyyy-MM-dd HH:mm') }} UTC\n\n📚 *EDU Explorer*\nStatus: {{ $('Run EDU Agent').item.json.data?.status ?? '❌ ' + $('Run EDU Agent').item.json.error }}\nReport: {{ $('Run EDU Agent').item.json.data?.report_submitted ? '✅ Enviado' : '⚠️ No enviado' }}\n{{ ($('Run EDU Agent').item.json.data?.summary ?? '').substring(0, 250) }}\n\n🛠️ *TECH Explorer*\nStatus: {{ $('Run TECH Agent').item.json.data?.status ?? '❌ ' + $('Run TECH Agent').item.json.error }}\nReport: {{ $('Run TECH Agent').item.json.data?.report_submitted ? '✅ Enviado' : '⚠️ No enviado' }}\n{{ ($('Run TECH Agent').item.json.data?.summary ?? '').substring(0, 250) }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "a1b2c3d4-0005-4005-8005-000000000005",
+      "name": "Send Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 8AM": {
+      "main": [
+        [
+          {
+            "node": "Run EDU Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run EDU Agent": {
+      "main": [
+        [
+          {
+            "node": "Wait 5 min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5 min": {
+      "main": [
+        [
+          {
+            "node": "Run TECH Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run TECH Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "a1b2c3d4-0010-4010-8010-000000000010",
+  "id": "agent-daily-runner-v1",
+  "tags": ["venture-studio", "agents", "daily"]
+}
