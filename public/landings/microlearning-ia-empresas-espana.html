@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forma a tu equipo en minutos, no en horas</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --primary: #6C3AED; --dark: #0f172a; --gray: #64748b; --light: #f8fafc; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--light); color: var(--dark); line-height: 1.6; }
+    header { background: var(--primary); color: #fff; padding: 80px 20px; text-align: center; }
+    header h1 { font-size: clamp(1.8rem, 5vw, 3rem); font-weight: 800; margin-bottom: 16px; }
+    header p { font-size: clamp(1rem, 2.5vw, 1.3rem); opacity: 0.9; max-width: 600px; margin: 0 auto; }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; max-width: 900px; margin: 48px auto; padding: 0 20px; }
+    .card { background: #fff; border-radius: 12px; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+    .card h3 { font-size: 1.1rem; color: var(--primary); margin-bottom: 12px; }
+    .benefits { background: #fff; max-width: 700px; margin: 48px auto; padding: 0 20px; }
+    .benefits h2 { text-align: center; font-size: 1.5rem; margin-bottom: 32px; color: var(--dark); }
+    .bullet { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+    .bullet-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+    .cta-section { text-align: center; padding: 60px 20px; }
+    .cta-section h2 { font-size: 1.6rem; margin-bottom: 32px; }
+    form { display: flex; flex-direction: column; gap: 12px; max-width: 400px; margin: 0 auto; }
+    input[type="email"] { padding: 14px 18px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1rem; outline: none; transition: border-color .2s; }
+    input[type="email"]:focus { border-color: var(--primary); }
+    button[type="submit"] { background: var(--primary); color: #fff; padding: 14px 18px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: opacity .2s; }
+    button[type="submit"]:hover { opacity: 0.88; }
+    footer { text-align: center; padding: 24px; color: var(--gray); font-size: 0.85rem; border-top: 1px solid #e2e8f0; }
+    @media(max-width:600px){ header { padding: 48px 16px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Forma a tu equipo en minutos, no en horas</h1>
+    <p>Microlearning potenciado por IA para PYMEs españolas. Reduce un 40% el coste de formación y mejora la retención del conocimiento. Cápsulas personalizadas de 5 minutos que se adaptan a cada empleado.</p>
+  </header>
+
+    <section class="two-col">
+      <div class="card"><h3>El problema</h3><p>Las PYMEs españolas gastan miles de euros en formación tradicional que los empleados olvidan en semanas. Cursos largos, genéricos y caros que no se adaptan al ritmo de trabajo real. El 60% de las pymes reconoce dificultades para desarrollar y retener talento.</p></div>
+      <div class="card"><h3>La solución</h3><p>LearnFlash IA genera cápsulas de microlearning personalizadas de 5 minutos usando inteligencia artificial. Se adaptan al nivel, rol y ritmo de cada empleado. Incluye: generación automática de contenidos, seguimiento de progreso con analítica IA, gamificación integrada, cumplimiento normativo (compliance), y soporte en español. Desde 3€/usuario/mes — hasta un 60% más barato que otras plataformas.</p></div>
+    </section>
+  <div class="benefits">
+    <h2>Por qué elegirnos</h2>
+    <div class="bullet"><div class="bullet-icon">1</div><p>Resultados rápidos y medibles</p></div>
+    <div class="bullet"><div class="bullet-icon">2</div><p>Fácil de usar, sin conocimientos técnicos</p></div>
+    <div class="bullet"><div class="bullet-icon">3</div><p>Soporte personalizado incluido</p></div>
+  </div>
+  <div class="cta-section">
+    <h2>Solicita tu demo gratuita</h2>
+    <form action="https://formspree.io/f/PLACEHOLDER" method="POST">
+      <input type="hidden" name="_replyto" value="learnflash.ia@gmail.com">
+      <input type="email" name="email" placeholder="Tu correo electrónico" required>
+      <button type="submit">Solicita tu demo gratuita</button>
+    </form>
+  </div>
+  <footer>
+    <p>© 2026 · Contacto: learnflash.ia@gmail.com</p>
+  </footer>
+</body>
+</html>
