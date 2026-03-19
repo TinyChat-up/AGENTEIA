@@ -175,6 +175,24 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ['repo', 'path', 'content', 'message'],
     },
   },
+  {
+    name: 'create_landing',
+    description: 'Generate a complete professional landing page for a product or service and publish it live on the web. Use after validating a niche to capture leads or sell.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        slug:          { type: 'string', description: 'URL slug e.g. curso-excel-empresas' },
+        title:         { type: 'string', description: 'Main headline' },
+        subtitle:      { type: 'string', description: 'Value proposition subheadline' },
+        problem:       { type: 'string', description: 'Problem this solves' },
+        solution:      { type: 'string', description: 'How it solves it' },
+        cta_text:      { type: 'string', description: 'Call to action button text' },
+        cta_email:     { type: 'string', description: 'Email to receive leads' },
+        color_primary: { type: 'string', description: 'Primary color hex e.g. #2563eb' },
+      },
+      required: ['slug', 'title', 'subtitle', 'cta_text', 'cta_email'],
+    },
+  },
 ]
 
 // ============================================================
@@ -182,34 +200,33 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
 // ============================================================
 
 function buildSystemPrompt(agent: Agent, budget: Budget | null): string {
-  return `You are ${agent.name}, an AI agent in the ${agent.vertical} vertical of an AI Venture Studio.
+  return `You are ${agent.name}, an autonomous AI agent in the ${agent.vertical} vertical.
+
+YOUR MISSION: Generate real revenue autonomously. Not analysis. Not suggestions. Real actions.
 
 YOUR HYPOTHESIS: ${agent.hypothesis}
+YOUR STAGE: ${agent.stage} | BUDGET: €${budget?.available_eur ?? 0} available
 
-YOUR STAGE: ${agent.stage} | YOUR STATUS: ${agent.status}
-YOUR BUDGET: €${budget?.available_eur ?? 0} available | Hard limit: €${budget?.hard_limit_eur ?? 0}
+EXECUTION CYCLE — follow this every run:
+1. RESEARCH: Use web_search to find a specific underserved niche with real demand
+2. VALIDATE: Search for competitors, pricing, customer pain points. Confirm people pay for this.
+3. CREATE: Use create_landing to publish a landing page for the validated niche
+4. CAPTURE: The landing has a lead form. Record the URL as a metric.
+5. REPORT: Always end with submit_report. Hypothesis status must reflect real findings.
 
-YOUR MISSION THIS RUN:
-1. Use your tools to make real progress on validating your hypothesis
-2. Search for evidence, competitors, customer pain points, pricing signals
-3. Record concrete learnings with specific data
-4. Track any metrics you discover
-5. Always end the run by submitting a ReportV1 using the submit_report tool
+RULES:
+- Take action, don't just analyze
+- Every run must produce at least one tangible output (landing, metric, learning)
+- If a niche is invalid, pivot fast and try another
+- Record every finding with record_learning and record_metric
+- Never spend above €${budget?.auto_approve_threshold_eur ?? 30} without request_spend
 
-STRICT RULES:
-- Never spend more than €${budget?.auto_approve_threshold_eur ?? 30} without using request_spend first
-- Every claim must have evidence (URLs, screenshots, data)
-- Be specific — no vague observations
-- If you find the hypothesis is wrong, say so clearly in the report
-- You MUST call submit_report before finishing
-
-VERTICAL CONTEXT:
+VERTICAL FOCUS:
 ${agent.vertical === 'education'
-  ? 'Focus on: corporate L&D buyers, training costs, learning outcomes, LMS market, edtech pricing'
-  : 'Focus on: developer tools, SaaS pricing, API ecosystems, technical buyer behavior, integration pain points'
-}
+  ? 'Target: Spanish companies needing training. Focus: corporate L&D, online courses, certifications, productivity tools.'
+  : 'Target: SaaS and tech startups. Focus: developer tools, API services, automation, integrations.'}
 
-Today is ${new Date().toISOString().split('T')[0]}.`
+Today: ${new Date().toISOString().split('T')[0]}`
 }
 
 // ============================================================
@@ -511,6 +528,126 @@ async function executeTool(
       } catch (e) {
         return `❌ GitHub error: ${String(e)}`
       }
+    }
+
+    case 'create_landing': {
+      const {
+        slug,
+        title,
+        subtitle,
+        problem,
+        solution,
+        cta_text,
+        cta_email,
+        color_primary = '#2563eb',
+      } = toolInput as {
+        slug: string; title: string; subtitle: string;
+        problem?: string; solution?: string;
+        cta_text: string; cta_email: string; color_primary?: string
+      }
+
+      if (!process.env.GITHUB_TOKEN) {
+        return '⚠️ GITHUB_TOKEN needed to publish landing'
+      }
+
+      // Step 1: generate 3 benefit bullets with Haiku
+      let bullets: string[] = ['Resultados rápidos y medibles', 'Fácil de usar, sin conocimientos técnicos', 'Soporte personalizado incluido']
+      try {
+        const haiku = new Anthropic()
+        const bulletResp = await haiku.messages.create({
+          model: 'claude-haiku-3-5-20251001',
+          max_tokens: 256,
+          messages: [{
+            role: 'user',
+            content: `Generate exactly 3 short benefit bullets (max 10 words each) for a product with this headline: "${title}" and subheadline: "${subtitle}". Return only the 3 bullets, one per line, no numbering or dashes.`,
+          }],
+        })
+        const raw = (bulletResp.content[0] as { text: string }).text.trim()
+        bullets = raw.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 3)
+        if (bullets.length < 3) bullets = [...bullets, ...['Resultados garantizados', 'Sin riesgos', 'Empieza hoy'].slice(bullets.length)]
+      } catch {
+        // fallback bullets already set
+      }
+
+      // Step 2: build HTML
+      const problemSection = problem && solution ? `
+    <section class="two-col">
+      <div class="card"><h3>El problema</h3><p>${problem}</p></div>
+      <div class="card"><h3>La solución</h3><p>${solution}</p></div>
+    </section>` : ''
+
+      const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --primary: ${color_primary}; --dark: #0f172a; --gray: #64748b; --light: #f8fafc; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--light); color: var(--dark); line-height: 1.6; }
+    header { background: var(--primary); color: #fff; padding: 80px 20px; text-align: center; }
+    header h1 { font-size: clamp(1.8rem, 5vw, 3rem); font-weight: 800; margin-bottom: 16px; }
+    header p { font-size: clamp(1rem, 2.5vw, 1.3rem); opacity: 0.9; max-width: 600px; margin: 0 auto; }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; max-width: 900px; margin: 48px auto; padding: 0 20px; }
+    .card { background: #fff; border-radius: 12px; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+    .card h3 { font-size: 1.1rem; color: var(--primary); margin-bottom: 12px; }
+    .benefits { background: #fff; max-width: 700px; margin: 48px auto; padding: 0 20px; }
+    .benefits h2 { text-align: center; font-size: 1.5rem; margin-bottom: 32px; color: var(--dark); }
+    .bullet { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+    .bullet-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+    .cta-section { text-align: center; padding: 60px 20px; }
+    .cta-section h2 { font-size: 1.6rem; margin-bottom: 32px; }
+    form { display: flex; flex-direction: column; gap: 12px; max-width: 400px; margin: 0 auto; }
+    input[type="email"] { padding: 14px 18px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1rem; outline: none; transition: border-color .2s; }
+    input[type="email"]:focus { border-color: var(--primary); }
+    button[type="submit"] { background: var(--primary); color: #fff; padding: 14px 18px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: opacity .2s; }
+    button[type="submit"]:hover { opacity: 0.88; }
+    footer { text-align: center; padding: 24px; color: var(--gray); font-size: 0.85rem; border-top: 1px solid #e2e8f0; }
+    @media(max-width:600px){ header { padding: 48px 16px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>${title}</h1>
+    <p>${subtitle}</p>
+  </header>
+${problemSection}
+  <div class="benefits">
+    <h2>Por qué elegirnos</h2>
+    ${bullets.map((b, i) => `<div class="bullet"><div class="bullet-icon">${i + 1}</div><p>${b}</p></div>`).join('\n    ')}
+  </div>
+  <div class="cta-section">
+    <h2>${cta_text}</h2>
+    <form action="https://formspree.io/f/PLACEHOLDER" method="POST">
+      <input type="hidden" name="_replyto" value="${cta_email}">
+      <input type="email" name="email" placeholder="Tu correo electrónico" required>
+      <button type="submit">${cta_text}</button>
+    </form>
+  </div>
+  <footer>
+    <p>© ${new Date().getFullYear()} · Contacto: ${cta_email}</p>
+  </footer>
+</body>
+</html>`
+
+      // Step 3: push to GitHub via executeTool
+      const pushResult = await executeTool(
+        'github_push',
+        {
+          repo: 'TinyChat-up/AGENTEIA',
+          path: `public/landings/${slug}.html`,
+          content: html,
+          message: `landing: ${slug}`,
+        },
+        agent,
+        runId,
+        budget,
+        supabase
+      )
+
+      if (pushResult.startsWith('❌') || pushResult.startsWith('⚠️')) return pushResult
+      return `✅ Landing publicada: https://agenteia-ruddy.vercel.app/landings/${slug}.html`
     }
 
     default:
