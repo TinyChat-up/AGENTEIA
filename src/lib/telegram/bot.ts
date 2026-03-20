@@ -144,8 +144,13 @@ export async function handleTelegramWebhook(body: TelegramUpdate): Promise<void>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callback_query_id: id }),
     })
-
-    if (data?.startsWith('approve_')) {
+if (data?.startsWith('approve_outreach_')) {
+      const outreachIndex = data.replace('approve_outreach_', '')
+      await handleOutreachApproval(outreachIndex, true, supabase)
+    } else if (data?.startsWith('reject_outreach_')) {
+      const outreachIndex = data.replace('reject_outreach_', '')
+      await handleOutreachApproval(outreachIndex, false, supabase)
+    } else if (data?.startsWith('approve_')) {
       const txId = data.replace('approve_', '')
       await handleApproval(txId, true, from.first_name, supabase)
     } else if (data?.startsWith('reject_')) {
@@ -419,5 +424,38 @@ interface TelegramUpdate {
     id: string
     data?: string
     from: { first_name: string }
+  }
+}
+async function handleOutreachApproval(index: string, approved: boolean, supabase: Awaited<ReturnType<typeof createClient>>) {
+  const { data: items } = await supabase
+    .from('outreach_queue')
+    .select('*')
+    .eq('status', 'pending_approval')
+    .order('created_at', { ascending: true })
+
+  if (!items || items.length === 0) {
+    await sendTelegramMessage('⚠️ No hay outreach pendiente.')
+    return
+  }
+
+  const item = items[parseInt(index) - 1] || items[0]
+  if (!item) return
+
+  if (approved) {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Alejandro <onboarding@resend.dev>',
+        to: ['olo.paya@gmail.com'],
+        subject: `Propuesta de automatización IA para ${item.agency_name}`,
+        text: item.email_body
+      })
+    })
+    await supabase.from('outreach_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id)
+    await sendTelegramMessage(`✅ Email enviado a *${item.agency_name}*`)
+  } else {
+    await supabase.from('outreach_queue').update({ status: 'rejected', rejected_at: new Date().toISOString() }).eq('id', item.id)
+    await sendTelegramMessage(`❌ Outreach rechazado: *${item.agency_name}*`)
   }
 }
