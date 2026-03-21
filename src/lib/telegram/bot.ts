@@ -144,7 +144,28 @@ export async function handleTelegramWebhook(body: TelegramUpdate): Promise<void>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callback_query_id: id }),
     })
-if (data?.startsWith('approve_outreach_')) {
+if (data?.startsWith('lead_called_')) {
+      const leadId = data.replace('lead_called_', '')
+      await supabase.from('leads').update({ status: 'called', last_contact_at: new Date().toISOString() }).eq('id', leadId)
+      await supabase.from('interactions').insert({ lead_id: leadId, type: 'call', direction: 'outbound', content: 'Llamada realizada - marcado desde Telegram' })
+      await sendTelegramMessage('📞 Lead marcado como llamado. ¿Resultado?', [
+        [{ text: '✅ Interesado — enviar propuesta', callback_data: 'lead_proposal_' + leadId }],
+        [{ text: '❌ No interesado', callback_data: 'lead_lost_' + leadId }]
+      ])
+    } else if (data?.startsWith('lead_proposal_')) {
+      const leadId = data.replace('lead_proposal_', '')
+      await supabase.from('leads').update({ status: 'proposal_sent' }).eq('id', leadId)
+      await sendTelegramMessage('📄 Lead en fase de propuesta. Te avisaré para hacer seguimiento en 48h.')
+    } else if (data?.startsWith('lead_closed_')) {
+      const leadId = data.replace('lead_closed_', '')
+      await supabase.from('leads').update({ status: 'closed_won' }).eq('id', leadId)
+      await supabase.from('interactions').insert({ lead_id: leadId, type: 'deal_closed', direction: 'outbound', content: 'Cliente cerrado' })
+      await sendTelegramMessage('🎉 CLIENTE CERRADO. Iniciando Builder Agent para preparar el producto...')
+    } else if (data?.startsWith('lead_lost_')) {
+      const leadId = data.replace('lead_lost_', '')
+      await supabase.from('leads').update({ status: 'closed_lost' }).eq('id', leadId)
+      await sendTelegramMessage('❌ Lead descartado y registrado.')
+    } else if (data?.startsWith('approve_outreach_')) {
       const outreachIndex = data.replace('approve_outreach_', '')
       await handleOutreachApproval(outreachIndex, true, supabase)
     } else if (data?.startsWith('reject_outreach_')) {
