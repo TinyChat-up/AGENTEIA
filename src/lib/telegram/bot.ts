@@ -447,6 +447,7 @@ async function handleOutreachApproval(index: string, approved: boolean, supabase
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: 'Alejandro <onboarding@resend.dev>',
+        reply_to: 'prof.alejandro.paya@gmail.com',
         to: ['olo.paya@gmail.com'],
         subject: `Propuesta de automatización IA para ${item.agency_name}`,
         text: item.email_body
